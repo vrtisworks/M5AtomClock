@@ -1,3 +1,12 @@
+# A simple little clock for the Atom Matrix
+# vrtisworks
+# v1.0 - November 2020
+# v2.0 - December 2020
+# 
+# Picked up the time from the RTM each second because counting it drifted too much
+# Lowered the intensity of the corners so they were not quite as obvious
+# Added a button click to turn the display on and off
+
 from m5stack import *
 from m5ui import *
 from uiflow import *
@@ -6,18 +15,18 @@ import time
 from numbers import Number
 import struct,socket,utime,machine
 
-apName='**DEFAULTSSID'
-apPassword='defaultpassword'
-altName='**ALTERNATESSID'
-altPassword='alternatepassword'
+apName='PrimarySSID'
+apPassword='**password**'
+altName='AlternateSSID'
+altPassword='**password**'
 
 # Time zone offset from GMT
 timeZoneOffset=-5*60*60
 hourTicks=0       # Once a day around midnight - we want to go get the updated ntp time
-currentSecond = 0
+# Seconds we just toggle the Dot on and off
+currentSecond = False
 currentHour = 0
 currentMinute = 0
-minuteDot = 0    # The last minute dot we light up
 whichDot = 0    # A work variable for when we are calculating dots to light
 # The second is always just one dot in the middle
 secondDot = 13
@@ -31,65 +40,104 @@ minuteMap = [
   17,17,17,17,17,17,17,
   12,12,12,12,12,12,12,12,
   07,07,07,07,07,07,07]
-hourMap = [4, 10, 15, 20, 24, 23, 22, 16, 11, 6, 2, 3]
+# This will be quicker when I need to turn all the minutes off
+minuteClear=[08,09,14,19,18,17,12,07]
+#          00,01,02,03,04,05,06,07,08,09,10,11
+#          12,13,14,15,16,17,18,19,20,21,22,23
+hourMap = [ 3, 4,10,15,20,24,23,22,16,11, 6, 2]
+# We start with the dots 'on' 
+showDots=True
+currentTime = ()
+maxTicks=0
+    
+# When we initially turn on the dots (either from a button toggle, or at startup)
+# It assumes all the dots are already off
+def turnDotsOn():
+  global currentHour,currentMinute,currentTime,secondDot,minuteMap,minuteDot,hourMap,whichDot,maxTicks
+  currentTime=utime.localtime()
+  currentHour = currentTime[3]
+  currentMinute = currentTime[4]
+  print(currentTime)
+  # Put purple in the corners so it doesn't look like the hours
+  rgb.setColor(1,0x330033)
+  rgb.setColor(5,0x330033)
+  rgb.setColor(21,0x330033)
+  rgb.setColor(25,0x330033)
+  # Then turn on the dots up to the current time (note: range doesn't inlcude the last number)
+  # Minutes are 0-59
+  for whichDot in range(currentMinute+1):
+    rgb.setColor(minuteMap[whichDot],0x00ff00)
+  # We only have a 12 hour clock (look out the window to determine am/pm)
+  # Hours go 0-23
+  if currentHour>11:
+    currentHour=currentHour-12
+  for whichDot in range(currentHour+1):
+    rgb.setColor(hourMap[whichDot],0xff0000)
+  print('Minute: ' + str(currentMinute)+' Dot:' + str(minuteMap[currentMinute]))
+  print('Hour: ' + str(currentHour)+' Dot:' + str(hourMap[currentHour]))
+  print('MaxTicks: '+str(maxTicks))
+  # Reset just in case it was >12
+  currentHour = currentTime[3]
+    
+# Toggle the show dots from on to off or off to on
+def toggleShow():
+  global showDots
+  if showDots:
+    # If it WAS true, we want to make it false and turn off all the dots.
+    showDots=False
+    rgb.setColorAll(0x000000)
+  else:
+    # If it WAS false, we want to make it true and turn on the necessary dots
+    showDots=True
+    turnDotsOn()
 
 def updateTime():
-  global currentSecond, currentHour, currentMinute, timeZoneOffset
-  ntpTime = setNTPtime(timeZoneOffset)
-  # Get the numbers we want, and make them zero based.
-  currentHour = ntpTime[3]-1
-  currentMinute = ntpTime[4]-1
-  currentSecond = ntpTime[5]-1
-  print(ntpTime)
+  global timeZoneOffset
+  setNTPtime(timeZoneOffset)
 
 @timerSch.event('handleTimer')
 def thandleTimer():
-  global currentHour,currentMinute,currentSecond,secondDot,minuteMap,minuteDot,hourMap,hourDot, whichDot,hourTicks
-  startTick=time.ticks_ms()
-  currentSecond = currentSecond + 1
+  global currentHour,currentMinute,currentSecond,secondDot,minuteMap,minuteClear,hourMap,whichDot,showDots,currentTime,maxTicks
+  ticks=time.ticks_ms()
+  # If we aren't showing dots, we have nothing to do
+  if not showDots:
+    return
+  # Otherwise, get the current time (because counting seconds doesn't work)
+  currentTime=utime.localtime()
+  # print(currentTime)
   # Seconds alternate green/purple
-  if currentSecond % 2 == 0:
+  if currentSecond:
     rgb.setColor(secondDot, 0x0000ff)
+    currentSecond=False
   else:
     rgb.setColor(secondDot, 0xff00ff)
-  # print('Second:'+str(currentSecond))
-  if currentSecond > 59:   
-    currentSecond = 0
-    currentMinute = currentMinute+ 1
-    print('Minute:' + str(currentMinute)+' Dot:' + str(minuteDot))
-  if currentMinute > 59:
-    # Need to turn off all the minute dots
-    # I assume the code to handle a setColor is a lot longer than a few extra if's
-    # So we only set 'black' once for each dot
-    minuteDot=-1
-    for whichDot in minuteMap:
-      if whichDot!=minuteDot:
-        minuteDot=whichDot
-        rgb.setColor(whichDot,0x000000)
-    # And minute is back to 0
-    currentMinute = 0
-    minuteDot=minuteMap[0]
-    rgb.setColor(minuteDot, 0x00ff00)
-    # Now handle the hour change
-    currentHour = currentHour + 1
-    # Check for PM
-    if currentHour>11:
-      # Need to reset to all black
+    currentSecond=True
+  if currentHour != currentTime[3]:
+    currentHour=currentTime[3]
+    # A new hour... need to turn off all the minutes
+    for whichDot in minuteClear:
+      rgb.setColor(whichDot,0x000000)
+    currentMinute=currentTime[4]
+    rgb.setColor(minuteMap[currentMinute], 0x00ff00)
+    # If it is noon or midnight - we need to turn all the other hour dots off
+    if currentHour==11 or currentHour==23:
       for whichDot in hourMap:
         rgb.setColor(whichDot,0x000000)
-      currentHour=0
-    # Then turn on the current dot
-    rgb.setColor(hourMap[currentHour], 0xff0000)
-    hourTicks=hourTicks-1
-    print('Hour:' + str(currentHour)+' Dot:' + str(hourMap[currentHour]))
-  else:
-    # We don't need to worry about the hour.. just light a dot if necessary
-    whichDot=minuteMap[currentMinute]
-    # See if we need to light a new dot
-    if whichDot != minuteDot:
-      minuteDot = whichDot
-      rgb.setColor(minuteDot, 0x00ff00)
-  # print('Ticks:'+str(time.ticks_diff(time.ticks_ms(),startTick)))
+    whichDot=currentHour
+    if whichDot>11:
+      whichDot=whichDot-12
+    rgb.setColor(hourMap[whichDot],0xff0000)
+    # print('currentHour:'+str(currentHour))
+    print (currentTime)
+  if currentMinute != currentTime[4]:
+    currentMinute=currentTime[4]
+    # A new Minute - just need to turn on the dot for that minute
+    rgb.setColor(minuteMap[currentMinute], 0x00ff00)
+    # print('currentMinute:'+str(currentMinute))
+  ticks=time.ticks_ms()-ticks
+  if ticks>maxTicks:
+    maxTicks=ticks
+    print('Ticks in Timer:'+str(ticks))
   pass
   
 def setNTPtime(tzoffset,host="pool.ntp.org"):
@@ -108,16 +156,26 @@ def setNTPtime(tzoffset,host="pool.ntp.org"):
     s.close()
   val = struct.unpack("!I", msg[40:44])[0]
   val=val-NTP_DELTA+tzoffset
+  print("val:"+str(val))
   tm=utime.localtime(val)
+  print(tm)
   # (year, month, day[, hour[, minute[, second[, microsecond[, tzinfo]]]]])
   machine.RTC().datetime((tm[0], tm[1], tm[2], tm[6] + 1, tm[3], tm[4], tm[5], 0))
-  return tm
+  # machine.RTC().datetime((2020,12,17,0,11,59,59,0))
   
+def loopTime(loops):
+  for i in range(loops):
+    wait(1)
+    print(utime.localtime())
+
+# ######################################################################################
+# Main initialization
+# ###################################################################################### 
 rgb.setBrightness(10)  
-rgb.setColorAll(0xff0000)
+rgb.setColorAll(0x330033)
 
 # First thing is we need to see/connect to wifi
-# Need to figure out where - so we scan for SSID's around us.
+# Need to figure out where - Nick or Matt
 wifiCfg.wlan_sta.active(True)
 networks = wifiCfg.wlan_sta.scan()
 for ssid, bssid, channel, rssi, authmode, hidden in networks:
@@ -133,34 +191,39 @@ if not (wifiCfg.wlan_sta.isconnected()):
     wait(1)
     print('Waiting to connect')
 print('Wifi Connected')
+
 # Get the clock from ntp and set the real time clock
 updateTime()
 # Turn off all the dots
 rgb.setColorAll(0x000000)
-# Put purple in the corners so it doesn't look like the hours
-rgb.setColor(1,0xff00ff)
-rgb.setColor(5,0xff00ff)
-rgb.setColor(21,0xff00ff)
-rgb.setColor(25,0xff00ff)
-# Then turn on the dots up to the current time (note: range doesn't inlcude the last number)
-for whichDot in range(currentMinute+1):
-  rgb.setColor(minuteMap[whichDot],0x00ff00)
-if currentHour>11:
-  currentHour=currentHour-12
-for whichDot in range(currentHour+1):
-  rgb.setColor(hourMap[whichDot],0xff0000)
-print('Second:'+str(currentSecond));
-print('Minute:' + str(currentMinute)+' Dot:' + str(minuteMap[currentMinute]))
-print('Hour:' + str(currentHour)+' Dot:' + str(hourMap[currentHour]))
+# This will turn on the Dots necessary to show current time
+turnDotsOn()
+hourTicks= 23 - currentHour
+# Set up the callback for the button press
+btnA.wasPressed(toggleShow)
 # Then crank up the time for 1 second intervals
 timerSch.run('handleTimer', 1000, 0x00)
-hourTicks= 23 - currentHour
 # Basically... we do nothing until about 'midnight' when we update the clock from NTP
 while True:
   if hourTicks<0:
+    print('Updating time from NTP')
     # Reset the time from NTP so we don't drift too far
+    # Stop the timer because updating it as the NTP time is fetched doesn't work well
+    timerSch.stop('handleTimer')
     updateTime()
+    # If we are showing the dots.. we need to turn them off
+    # Then immediately back on with the 'new' time
+    if showDots:
+      toggleShow()
+      toggleShow()
+    # If the dots weren't on.. then we don't have to worry.
+    # Now we can start the timer back up.
+    timerSch.run('handleTimer', 1000, 0x00)
+    # After we get back from that, we can start the wait again
     hourTicks=24
   # Then just sleep for an hour and check it again
   time.sleep(3600)
+  # time.sleep(60)
+  hourTicks=hourTicks-1
+  print('hourTicks:'+str(hourTicks))
   
