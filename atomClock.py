@@ -120,7 +120,7 @@ def thandleTimer():
     currentMinute=currentTime[4]
     rgb.setColor(minuteMap[currentMinute], 0x00ff00)
     # If it is noon or midnight - we need to turn all the other hour dots off
-    if currentHour==11 or currentHour==23:
+    if currentHour==0 or currentHour==12:
       for whichDot in hourMap:
         rgb.setColor(whichDot,0x000000)
     whichDot=currentHour
